@@ -140,3 +140,4 @@ for i=1:sizeimg_X
 end
 wimg=uint8(wimg);
 end
+
