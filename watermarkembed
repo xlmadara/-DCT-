@@ -1,0 +1,142 @@
+%该函数用于嵌入二值图像水印,img为灰度图像
+function wimg=watermarkembed(img,wm,passwd)
+%图像分块尺寸
+sizeimg=size(img);
+sizeimg_X=fix(sizeimg(1)/8);
+sizeimg_Y=fix(sizeimg(2)/8);
+%二值水印尺寸
+sizewm=size(wm);
+sizewm_X=sizewm(1);
+sizewm_Y=sizewm(2);
+%水印置乱
+s=testnum(passwd,sizewm_X*sizewm_Y);%置乱序列
+wm2=zeros(1,sizewm_X*sizewm_Y);%用来存储置乱后的水印信息
+for i=1:sizewm_X*sizewm_Y
+    wm2(i)=wm(s(i));
+end
+tmp=zeros(sizewm_X*sizewm_Y,fix(log2(sizewm_X*sizewm_Y))-1);
+%多次置乱
+for k=1:fix(log2(sizewm_X*sizewm_Y))-1%分若干个组,每一次分成power(2,k)个组
+    args=sizewm_X*sizewm_Y/uint64(power(2,k));%每组有几个数据
+    s=testnum(uint64(passwd/power(2,k)),args);%得到相应置乱序列
+    %对每个小组进行置乱
+    for i=1:uint64(power(2,k))
+        for j=1:args
+            if(k==1)  
+                tmp((i-1)*args+j,k)=wm2((i-1)*args+s(j));
+            else
+                tmp((i-1)*args+j,k)=tmp((i-1)*args+s(j),k-1);
+            end
+        end
+    end
+end
+
+wm2=tmp(:,uint64(log2(sizewm_X*sizewm_Y))-2);
+%原始图像8*8分块
+k=1;
+c=zeros(8,8,sizeimg_X*sizeimg_Y);
+for i=1:sizeimg_X
+    for j=1:sizeimg_Y
+        c(:,:,k)=img((i-1)*8+1:(i-1)*8+8,(j-1)*8+1:(j-1)*8+8);
+        k=k+1;
+    end
+end
+%DCT变换
+dc=zeros(8,8,sizeimg_X*sizeimg_Y);
+for i=1:sizeimg_X*sizeimg_Y
+    dc(:,:,i)=dct2(c(:,:,i));
+end
+%图像分类
+[c1ind,c2ind,~]=imgclassify(img);
+%二值水印嵌入
+index1=1;
+index2=1;
+
+for i=1:sizewm_X*sizewm_Y
+     %将水印信息嵌入嵌入dct中频系数(5,2),(4,3)中
+     index_x1=5;index_y1=2;
+     index_x2=4;index_y2=3;
+        
+    if(i==c1ind(index1))%平滑区,参数选为5
+        index1=index1+1;
+        b=5;
+    else 
+        if(i==c2ind(index2))%纹理区,参数选为9
+            index2=index2+1;
+            b=9;
+        else%边缘区,参数选为7
+            b=7;
+        end
+    end
+   %调整系数差绝对值大小，嵌入信息 
+    a=10;%阈值
+  %嵌入1，则两系数之差的绝对值要不大于a
+    if(wm2(i)==1&&abs(dc(index_x1,index_y1,i)-dc(index_x2,index_y2,i))>a)
+        if(dc(index_x1,index_y1,i)>dc(index_x2,index_y2,i))
+            dv=dc(index_x1,index_y1,i)-dc(index_x2,index_y2,i)-a;
+            dv=dv/2;
+            dc(index_x1,index_y1,i)=dc(index_x1,index_y1,i)-dv;
+            dc(index_x2,index_y2,i)=dc(index_x2,index_y2,i)+dv;
+        else
+            dv=dc(index_x2,index_y2,i)-dc(index_x1,index_y1,i)-a;
+            dv=dv/2;
+            dc(index_x1,index_y1,i)=dc(index_x1,index_y1,i)+dv;
+            dc(index_x2,index_y2,i)=dc(index_x2,index_y2,i)-dv;    
+        end
+    end
+    %嵌入0,则两系数之差的绝对值要大于a
+    if(wm2(i)==0&&abs(dc(index_x1,index_y1,i)-dc(index_x2,index_y2,i))<=a)
+        if(dc(index_x1,index_y1,i)>dc(index_x2,index_y2,i))
+            dv=a-(dc(index_x1,index_y1,i)-dc(index_x2,index_y2,i));
+            dv=dv/2;
+            dc(index_x1,index_y1,i)=dc(index_x1,index_y1,i)+dv;
+            dc(index_x2,index_y2,i)=dc(index_x2,index_y2,i)-dv;
+        else
+            dv=a-(dc(index_x2,index_y2,i)-dc(index_x1,index_y1,i));
+            dv=dv/2;
+            dc(index_x1,index_y1,i)=dc(index_x1,index_y1,i)-dv;
+            dc(index_x2,index_y2,i)=dc(index_x2,index_y2,i)+dv;    
+        end
+    end
+    %根据参数b增强鲁棒性
+    if(wm2(i)==1&&abs(dc(index_x1,index_y1,i)-dc(index_x2,index_y2,i))>=a-b)
+        if(dc(index_x1,index_y1,i)>dc(index_x2,index_y2,i))
+            b=b/2;
+            dc(index_x1,index_y1,i)=dc(index_x1,index_y1,i)-b;
+            dc(index_x2,index_y2,i)=dc(index_x2,index_y2,i)+b;
+        else
+            b=b/2;
+            dc(index_x1,index_y1,i)=dc(index_x1,index_y1,i)+b;
+            dc(index_x2,index_y2,i)=dc(index_x2,index_y2,i)-b;    
+        end
+    end
+    if(wm2(i)==0&&abs(dc(index_x1,index_y1,i)-dc(index_x2,index_y2,i))<=a+b)
+         if(dc(index_x1,index_y1,i)>dc(index_x2,index_y2,i))
+            b=b/2;
+            dc(index_x1,index_y1,i)=dc(index_x1,index_y1,i)+b;
+            dc(index_x2,index_y2,i)=dc(index_x2,index_y2,i)-b;
+         else
+            b=b/2;
+            dc(index_x1,index_y1,i)=dc(index_x1,index_y1,i)-b;
+            dc(index_x2,index_y2,i)=dc(index_x2,index_y2,i)+b;    
+         end  
+    end
+
+end
+
+%分块DCT逆变换
+idc=zeros(8,8,sizeimg_X,sizeimg_Y);
+for i=1:sizeimg_X*sizeimg_Y
+    idc(:,:,i)=idct2(dc(:,:,i));
+end
+%合块
+k=1;
+wimg=zeros(sizeimg_X,sizeimg_Y);
+for i=1:sizeimg_X
+    for j=1:sizeimg_Y
+        wimg((i-1)*8+1:(i-1)*8+8,(j-1)*8+1:(j-1)*8+8)=idc(:,:,k);
+        k=k+1;
+    end
+end
+wimg=uint8(wimg);
+end
